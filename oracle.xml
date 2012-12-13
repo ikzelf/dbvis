@@ -11,7 +11,7 @@
 <DatabaseProfile
    desc="Profile for Oracle"
    version="$Revision: 14851 $"
-   date="$Date: 2012-05-08 17:30:45 +0200 (Tue, 08 May 2012) $"
+   date="$Date: 2012-05-08 17:30:45 +0200 (Tis, 08 Maj 2012) $"
    minver="7.1">
 
    <!--
@@ -21,6 +21,7 @@
 
     Change Log
     ==========
+      2012-12-13: Ronald Rood added rsmgr mapping, fixed quotes and sort order
       2011-04-08:
         - Contributions by Ronald Rood:
           DBVIS-1450 ASM updates for Oracle
@@ -2060,7 +2061,8 @@ SELECT
     p.spid,
     p.pid,
     s.serial#,
-    si.sid
+    si.sid,
+    s.resource_consumer_group
 FROM
     sys.v_$sess_io si,
     sys.v_$session s,
@@ -2069,9 +2071,7 @@ WHERE
     s.username IS NOT NULL
 AND si.sid(+) = s.sid
 AND p.addr(+) = s.paddr
-ORDER BY
-    status,
-    si.consistent_gets + si.block_gets DESC;
+ORDER BY s.username,s.sid;
                ]]>
             </If>
             <Else>
@@ -2106,9 +2106,7 @@ WHERE
     s.username IS NOT NULL
 AND si.sid(+) = s.sid
 AND p.addr(+) = s.paddr
-ORDER BY
-    status,
-    si.consistent_gets + si.block_gets DESC
+ORDER BY s.username, s.sid
                ]]>
             </Else>
          </SQL>
@@ -2879,6 +2877,38 @@ select * from sys.dba_advisor_findings where task_name like 'dbvis_%' and task_n
             <![CDATA[
 select * from sys.dba_advisor_recommendations where finding_id like '${finding_id}' and task_name like 'dbvis_%' and task_name like '${task_name}' order by task_name;
             ]]>
+         </SQL>
+      </Command>
+
+      <Command id="oracle.getResourceUsage">
+         <SQL>
+            <![CDATA[
+select * from v$rsrc_consumer_group order by name
+           ]]>
+         </SQL>
+      </Command>
+
+      <Command id="oracle.getResourceConsumerMapping">
+         <SQL>
+            <![CDATA[
+select * from (
+select def.*, decode(def.status,NULL,' ', def.status) pstat from DBA_RSRC_group_mappings def 
+where attribute = '${objectname}'
+)
+order by pstat, value
+           ]]>
+         </SQL>
+      </Command>
+
+      <Command id="oracle.getResourceConsumerMappings">
+         <SQL>
+            <![CDATA[
+select * from (
+select def.*, decode(def.status,NULL,' ', def.status) pstat from DBA_RSRC_MAPPING_PRIORITY def 
+where attribute like '${objectname}'
+)
+order by pstat, priority
+           ]]>
          </SQL>
       </Command>
 
@@ -5724,20 +5754,20 @@ END;]]></SQL>
                <Values>
                   <Command>
                      <SQL>
-                        <![CDATA[select concat(level, '') from dual connect by level <= (select (max(argument_position) + 1) from ${#cp.SystemTablePrefix}_scheduler_job_args where owner='${schema}' and job_name='${objectname}');]]></SQL>
+                        <![CDATA[select concat(level, '') from dual connect by level <= (select (max(argument_position) + 1) from ${#cp.SystemTablePrefix}_scheduler_job_args where owner='${schema}' and job_name='"${objectname}"');]]></SQL>
                   </Command>
                </Values>
                <Default>
                   <Command>
                      <SQL>
-                        <![CDATA[select (max(argument_position) + 1) from ${#cp.SystemTablePrefix}_scheduler_job_args where owner='${schema}' and job_name='${objectname}';]]></SQL>
+                        <![CDATA[select (max(argument_position) + 1) from ${#cp.SystemTablePrefix}_scheduler_job_args where owner='${schema}' and job_name='"${objectname}"';]]></SQL>
                   </Command>
                </Default>
             </Input>
             <Input name="argument_value" label="Argument Value" style="text" editable="true"/>
             <Command parsesql='false'>
                <SQL>
-                  <![CDATA[begin dbms_scheduler.set_job_argument_value(job_name=>'${schema}.${objectname}', argument_position=>'${argument_position}', argument_value=>'${argument_value}'); end;]]></SQL>
+                  <![CDATA[begin dbms_scheduler.set_job_argument_value(job_name=>'${schema}."${objectname}"', argument_position=>'${argument_position}', argument_value=>'${argument_value}'); end;]]></SQL>
             </Command>
             <Confirm><![CDATA[add argument to job ${objectname}?]]></Confirm>
             <Result>Argument has been added.</Result>
@@ -5752,7 +5782,7 @@ END;]]></SQL>
             <Input name="argument_value" label="Argument Value" style="text" editable="true"/>
             <Command parsesql='false'>
                <SQL>
-                  <![CDATA[begin dbms_scheduler.set_job_argument_value(job_name=>'${schema}.${theJobName}', argument_position=>'${objectname}', argument_value=>'${argument_value}'); end;]]></SQL>
+                  <![CDATA[begin dbms_scheduler.set_job_argument_value(job_name=>'${schema}."${theJobName}"', argument_position=>'${objectname}', argument_value=>'${argument_value}'); end;]]></SQL>
             </Command>
             <Confirm>
                <![CDATA[modify argument ${objectname} of job ${theJobName}?]]></Confirm>
@@ -5764,7 +5794,7 @@ END;]]></SQL>
             </Input>
             <Command parsesql='false'>
                <SQL>
-                  <![CDATA[begin dbms_scheduler.reset_job_argument_value(job_name=>'${schema}.${theJobName}', argument_position=>'${objectname}'); end;]]></SQL>
+                  <![CDATA[begin dbms_scheduler.reset_job_argument_value(job_name=>'${schema}."${theJobName}"', argument_position=>'${objectname}'); end;]]></SQL>
             </Command>
             <Confirm>
                <![CDATA[Remove argument ${objectname} of job ${theJobName}?]]></Confirm>
@@ -5913,7 +5943,7 @@ end;]]></SQL>
             </Input>
             <Command parsesql='false'>
                <SQL>
-                  <![CDATA[begin dbms_scheduler.enable('${schema}.${objectname}'); end;]]></SQL>
+                  <![CDATA[begin dbms_scheduler.enable('${schema}."${objectname}"'); end;]]></SQL>
             </Command>
             <Confirm><![CDATA[Enable scheduler chain?]]></Confirm>
             <Result>Scheduler chain has been enabled.</Result>
@@ -5932,7 +5962,7 @@ end;]]></SQL>
             </Input>
             <Command parsesql='false'>
                <SQL>
-                  <![CDATA[begin dbms_scheduler.disable(name=>'${schema}.${objectname}', force=>${force}); end;]]></SQL>
+                  <![CDATA[begin dbms_scheduler.disable(name=>'${schema}."${objectname}"', force=>${force}); end;]]></SQL>
             </Command>
             <Confirm><![CDATA[Disable scheduler chain?]]></Confirm>
             <Result>Scheduler chain has been disabled.</Result>
@@ -5948,7 +5978,7 @@ end;]]></SQL>
             </Input>
             <Command parsesql='false'>
                <SQL>
-                  <![CDATA[begin dbms_scheduler.drop_chain(chain_name=>'${schema}.${objectname}', force=>${force}); end;]]></SQL>
+                  <![CDATA[begin dbms_scheduler.drop_chain(chain_name=>'${schema}."${objectname}"', force=>${force}); end;]]></SQL>
             </Command>
             <Confirm><![CDATA[Drop scheduler chain?]]></Confirm>
             <Result>Scheduler chain has been dropped.</Result>
@@ -6246,7 +6276,7 @@ end;]]></SQL>
             </Input>
             <Command parsesql='false'>
                <SQL>
-                  <![CDATA[begin dbms_scheduler.enable('${schema}.${objectname}'); end;]]></SQL>
+                  <![CDATA[begin dbms_scheduler.enable('${schema}."${objectname}"'); end;]]></SQL>
             </Command>
             <Confirm>
                <![CDATA[Enable dbms_scheduler job ${objectname}?]]></Confirm>
@@ -6263,7 +6293,7 @@ end;]]></SQL>
             </Input>
             <Command parsesql='false'>
                <SQL>
-                  <![CDATA[begin dbms_scheduler.disable(name=>'${schema}.${objectname}', force=>${force}); end;]]></SQL>
+                  <![CDATA[begin dbms_scheduler.disable(name=>'${schema}."${objectname}"', force=>${force}); end;]]></SQL>
             </Command>
             <Confirm>
                <![CDATA[Disable dbms_scheduler job ${objectname}?]]></Confirm>
@@ -6297,7 +6327,7 @@ end;]]></SQL>
             </Input>
             <Command parsesql='false'>
                <SQL>
-                  <![CDATA[begin dbms_scheduler.set_attribute(name => '${schema}.${objectname}', attribute => '${attribute}', value => '${value}'); end;]]></SQL>
+                  <![CDATA[begin dbms_scheduler.set_attribute(name => '${schema}."${objectname}"', attribute => '${attribute}', value => '${value}'); end;]]></SQL>
             </Command>
             <Confirm>
                <![CDATA[Modify dbms_scheduler job ${schema}.${objectname}?]]></Confirm>
@@ -6314,7 +6344,7 @@ end;]]></SQL>
             </Input>
             <Command parsesql='false'>
                <SQL>
-                  <![CDATA[begin dbms_scheduler.run_job(job_name => '${schema}.${objectname}', use_current_session => ${in_current_session}); end;]]></SQL>
+                  <![CDATA[begin dbms_scheduler.run_job(job_name => '${schema}."${objectname}"', use_current_session => ${in_current_session}); end;]]></SQL>
             </Command>
             <Confirm><![CDATA[Run dbms_scheduler job ${objectname}?]]></Confirm>
             <Result>dbms_scheduler job has been run.</Result>
@@ -6347,7 +6377,7 @@ end;]]></SQL>
             <SetVar name="_value" value='#value.equals("TRUE") or #value.equals("FALSE") ? #value : "\u0027" + #value +"\u0027"'/>
             <Command parsesql='false'>
                <SQL>
-                  <![CDATA[begin dbms_scheduler.alter_running_chain(job_name=>'${objectname}', step_name=>'${step_name}', attribute=>'${attribute}', value=>${_value}); end;]]></SQL>
+                  <![CDATA[begin dbms_scheduler.alter_running_chain(job_name=>'"${objectname}"', step_name=>'${step_name}', attribute=>'${attribute}', value=>${_value}); end;]]></SQL>
             </Command>
             <Confirm><![CDATA[Alter Running Chain?]]></Confirm>
             <Result>Running chain has been altered.</Result>
@@ -6363,7 +6393,7 @@ end;]]></SQL>
             </Input>
             <Command parsesql='false'>
                <SQL>
-                  <![CDATA[begin dbms_scheduler.stop_job(job_name=>'${schema}.${objectname}', force=>${force}); end;]]></SQL>
+                  <![CDATA[begin dbms_scheduler.stop_job(job_name=>'${schema}."${objectname}"', force=>${force}); end;]]></SQL>
             </Command>
             <Confirm>
                <![CDATA[Stop dbms_scheduler job ${objectname}?]]></Confirm>
@@ -6376,7 +6406,7 @@ end;]]></SQL>
             <Input name="new_job" label="New Job" style="text" editable="true"/>
             <Command parsesql='false'>
                <SQL>
-                  <![CDATA[begin dbms_scheduler.copy_job(old_job=>'${schema}.${objectname}', new_job=>'${new_job}'); end;]]></SQL>
+                  <![CDATA[begin dbms_scheduler.copy_job(old_job=>'${schema}."${objectname}"', new_job=>'"${new_job}"'); end;]]></SQL>
             </Command>
             <Confirm>
                <![CDATA[Copy dbms_scheduler job ${objectname} to ${new_job}?]]></Confirm>
@@ -6393,10 +6423,10 @@ end;]]></SQL>
             </Input>
             <Command parsesql='false'>
                <SQL>
-                  <![CDATA[begin dbms_scheduler.drop_job(job_name=>'${schema}.${objectname}', force=>${force}); end;]]></SQL>
+                  <![CDATA[begin dbms_scheduler.drop_job(job_name=>'${schema}."${objectname}"', force=>${force}); end;]]></SQL>
             </Command>
             <Confirm>
-               <![CDATA[Drop dbms_scheduler job ${schema}.${objectname}?]]></Confirm>
+               <![CDATA[Drop dbms_scheduler job ${schema}."${objectname}"?]]></Confirm>
             <Result>dbms_scheduler job has been dropped.</Result>
          </Action>
       </ActionGroup>
@@ -6941,12 +6971,17 @@ END;]]></SQL>
       </ActionGroup>
 
       <ActionGroup type="ResourceManager">
+        <!--
          <Action id="oracle-rsrc-create-pending" label="Create Pending Area" icon="add" reload="true" mode="execute" resultaction="ask">
+         -->
+         <Action id="oracle-rsrc-create-pending" label="Create Pending Area" icon="add" reload="true" mode="execute">
             <Command parsesql='false'>
                <SQL>
                   <![CDATA[begin dbms_resource_manager.create_pending_area(); end;]]></SQL>
             </Command>
+            <!--
             <Confirm><![CDATA[Create new pending area?]]></Confirm>
+            -->
             <Result>Pending area created.</Result>
          </Action>
          <Action id="oracle-rsrc-validate-pending" label="Validate Pending Area" icon="warning" reload="true" mode="execute" resultaction="ask">
@@ -6980,7 +7015,7 @@ END;]]></SQL>
             <Command parsesql='false'>
                <SQL><![CDATA[begin
             dbms_output.put_line ('select sysdate');
-            for i in (select  ',(select '||ac.column_name||' from V$RSRC_CONSUMER_GROUP where name = '''||rs.name||''')'|| substr(rs.name ||ac.column_name,1,30)  line
+            for i in (select  ',(select '||ac.column_name||' from V$RSRC_CONSUMER_GROUP where name = '''||rs.name||''')'|| substr(replace(rs.name ||ac.column_name,'_'),1,30)  line
             from all_tab_columns ac
             , V$RSRC_CONSUMER_GROUP rs
             where ac.table_name = 'V_$RSRC_CONSUMER_GROUP'
@@ -6997,6 +7032,43 @@ END;]]></SQL>
             <Result>Monitoring SQL generated, put it in a bookmark to use in a
                monitor.
             </Result>
+         </Action>
+      </ActionGroup>
+
+      <ActionGroup type="ResourceConsumerMapping">
+         <Action id="oracle-rsrc-add-mapping" label="Add Resource Group Mapping" icon="add" reload="true" mode="execute" resultaction="ask">
+           <Input name="attribute" style="text" editable="true">
+             <Default>${objectname}</Default>
+           </Input>
+           <Input name="value" style="text" editable="true"/>
+           <Input name="group" label="Resource Consumer Group" style="list">
+              <Values>
+                 <Command>
+                    <SQL>
+                       <![CDATA[select distinct consumer_group from
+                       DBA_RSRC_CONSUMER_GROUPS order by consumer_group]]></SQL>
+                 </Command>
+              </Values>
+           </Input>
+           <Command parsesql='false'>
+              <SQL><![CDATA[begin
+                dbms_resource_manager.set_consumer_group_mapping(attribute => '${attribute}', value => '${value}', consumer_group => '${group}');
+          end;]]></SQL>
+           </Command>
+            <Result>Mapping added.</Result>
+         </Action>
+      </ActionGroup>
+
+      <ActionGroup type="ResourceConsumerMappingValue">
+         <Action id="oracle-rsrcremove-mapping" label="Remove From Resource Group Mapping" icon="remove" reload="true" mode="execute" resultaction="ask">
+            <Confirm>
+              <![CDATA[Remove this Mapping of ${objectname} for ${attribute} from ${groupname}?]]></Confirm>
+           <Command parsesql='false'>
+              <SQL><![CDATA[begin
+                dbms_resource_manager.set_consumer_group_mapping(attribute => '${attribute}', value => '${objectname}', consumer_group => NULL);
+          end;]]></SQL>
+           </Command>
+            <Result>Mapping removed.</Result>
          </Action>
       </ActionGroup>
 
@@ -7242,8 +7314,8 @@ END;]]></SQL>
                   <Command>
                      <SQL><![CDATA[select group_or_subplan from ( select * from (select consumer_group group_or_subplan, 2 sel from DBA_RSRC_CONSUMER_GROUPS
                                                                   union select plan ,2 from dba_rsrc_plans
-                                                                  union select 'CANCEL_SQL', 2 from dual
-                                                                  union select 'KILL_SESSION', 2 from dual
+                                                                  union select '''CANCEL_SQL''', 2 from dual
+                                                                  union select '''KILL_SESSION''', 2 from dual
                                                                   union select '${oracle.getResourcePlanDirectives.SWITCH_GROUP}', 1 from dual
                                                                   ) order by sel,group_or_subplan
                                     )]]></SQL>
@@ -9422,6 +9494,22 @@ end;
 
          <If test="#dm.getDatabaseMajorVersion() gte 8">
             <GroupNode type="ResourceManager" label="Resource Manager" isLeaf="false">
+               <GroupNode type="ResourceConsumerMappings" label="Resource Consumer Group Mapping" isLeaf="false">
+                 <DataNode type="ResourceConsumerMapping" label="${oracle.getResourceConsumerMappings.PSTAT} ${oracle.getResourceConsumerMappings.PRIORITY} ${oracle.getResourceConsumerMappings.ATTRIBUTE}" isLeaf="false">
+                     <SetVar name="objectname" value="${oracle.getResourceConsumerMappings.ATTRIBUTE}"/>
+                     <Command idref="oracle.getResourceConsumerMappings">
+                        <Input name="objectname" value="%"/>
+                     </Command>
+                     <DataNode type="ResourceConsumerMappingValue" label="${oracle.getResourceConsumerMapping.VALUE}.${oracle.getResourceConsumerMapping.CONSUMER_GROUP}" isLeaf="true">
+                       <SetVar name="objectname" value="${oracle.getResourceConsumerMapping.VALUE}"/>
+                       <SetVar name="attribute" value="${oracle.getResourceConsumerMapping.ATTRIBUTE}"/>
+                       <SetVar name="groupname" value="${oracle.getResourceConsumerMapping.CONSUMER_GROUP}"/>
+                       <Command idref="oracle.getResourceConsumerMapping">
+                         <Input name="objectname" value="${oracle.getResourceConsumerMappings.ATTRIBUTE}"/>
+                       </Command>
+                     </DataNode>
+                  </DataNode>
+               </GroupNode>
                <GroupNode type="ResourceConsumerGroups" label="Resource Consumer Groups" isLeaf="false">
                   <DataNode type="ResourceConsumerGroup" label="${oracle.getResourceConsumerGroups.PSTAT} ${oracle.getResourceConsumerGroups.CONSUMER_GROUP}" isLeaf="true">
                      <SetVar name="objectname" value="${oracle.getResourceConsumerGroups.CONSUMER_GROUP}"/>
@@ -11442,6 +11530,21 @@ This is the active SQL with plan data for this session.
                <Input name="command" value="alter system kill session '${object=SID},${object=SERIAL#}'"/>
             </Input>
             <Command idref="oracle.getBlockingLocks"/>
+         </DataView>
+      </ObjectView>
+
+      <ObjectView type="ResourceManager">
+         <DataView type="ResourceManager" label="Resource Usage" viewer="grid">
+            <Command idref="oracle.getResourceUsage">
+            </Command>
+         </DataView>
+      </ObjectView>
+
+      <ObjectView type="ResourceConsumerMapping">
+         <DataView type="ResourceConsumerMapping" label="Resource Consumer Group Mapping" viewer="grid">
+            <Command idref="oracle.getResourceConsumerMapping">
+               <Input name="attribute" value="${objectname}"/>
+            </Command>
          </DataView>
       </ObjectView>
 
